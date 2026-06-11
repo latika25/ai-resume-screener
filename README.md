@@ -110,3 +110,7 @@ Browser → React (port 3001)
               ↓ JSON / SSE stream
          Express → React → UI
 ```
+
+<img width="1878" height="866" alt="image" src="https://github.com/user-attachments/assets/a1ae47f7-949e-4733-ba8a-db168a82d956" />
+<img width="1686" height="842" alt="image" src="https://github.com/user-attachments/assets/191d9070-f972-4b88-b936-80a300507129" />
+
