@@ -1,9 +1,10 @@
-import Anthropic from '@anthropic-ai/sdk';
+import Groq from 'groq-sdk';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const client = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const MODEL = 'llama-3.3-70b-versatile';
 
 export interface ScreeningResult {
   matchScore: number;
@@ -19,7 +20,17 @@ export async function analyzeJobFit(
   resume: string,
   jobDescription: string
 ): Promise<ScreeningResult> {
-  const prompt = `You are an expert technical recruiter. Analyze the resume against the job description and return ONLY a JSON object with no markdown, no backticks, no preamble.
+  const response = await client.chat.completions.create({
+    model: MODEL,
+    max_tokens: 1000,
+    messages: [
+      {
+        role: 'system',
+        content: 'You are an expert technical recruiter. Return ONLY valid JSON with no markdown, no backticks, no preamble.',
+      },
+      {
+        role: 'user',
+        content: `Analyze this resume against the job description.
 
 Resume:
 ${resume}
@@ -36,19 +47,12 @@ Return this exact JSON structure:
   "gaps": [<2-3 key gaps>],
   "recommendation": "<apply|maybe|skip>",
   "tailoredSummary": "<2 sentence resume summary tailored to this specific JD>"
-}`;
-
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 1000,
-    messages: [{ role: 'user', content: prompt }],
+}`,
+      },
+    ],
   });
 
-  const text = response.content
-    .filter((b) => b.type === 'text')
-    .map((b) => (b as { type: 'text'; text: string }).text)
-    .join('');
-
+  const text = response.choices[0]?.message?.content || '';
   const clean = text.replace(/```json|```/g, '').trim();
   return JSON.parse(clean) as ScreeningResult;
 }
@@ -58,7 +62,18 @@ export async function analyzeJobFitStream(
   jobDescription: string,
   onChunk: (chunk: string) => void
 ): Promise<void> {
-  const prompt = `You are an expert technical recruiter. Analyze this resume against the job description.
+  const stream = await client.chat.completions.create({
+    model: MODEL,
+    max_tokens: 1000,
+    stream: true,
+    messages: [
+      {
+        role: 'system',
+        content: 'You are an expert technical recruiter.',
+      },
+      {
+        role: 'user',
+        content: `Analyze this resume against the job description.
 
 Resume:
 ${resume}
@@ -69,23 +84,16 @@ ${jobDescription}
 Provide a detailed analysis covering:
 1. Overall fit score (0-100)
 2. Matched skills
-3. Missing skills  
+3. Missing skills
 4. Key strengths
 5. Gaps to address
-6. A tailored resume summary for this role`;
-
-  const stream = await client.messages.stream({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 1000,
-    messages: [{ role: 'user', content: prompt }],
+6. A tailored resume summary for this role`,
+      },
+    ],
   });
 
   for await (const chunk of stream) {
-    if (
-      chunk.type === 'content_block_delta' &&
-      chunk.delta.type === 'text_delta'
-    ) {
-      onChunk(chunk.delta.text);
-    }
+    const text = chunk.choices[0]?.delta?.content || '';
+    if (text) onChunk(text);
   }
 }
