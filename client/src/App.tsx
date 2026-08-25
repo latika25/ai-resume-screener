@@ -207,13 +207,6 @@ export default function App() {
         <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 17, letterSpacing: '-0.02em' }}>
           resume<span style={{ color: 'var(--accent-bright)' }}>screen</span>
         </span>
-        <span style={{
-          marginLeft: 'auto',
-          fontSize: 11,
-          color: 'var(--text-muted)',
-          fontWeight: 500,
-          letterSpacing: '0.05em',
-        }}>powered by Claude</span>
       </header>
 
       {/* Main */}
