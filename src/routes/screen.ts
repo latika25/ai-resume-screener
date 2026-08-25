@@ -3,6 +3,20 @@ import { analyzeJobFit, analyzeJobFitStream } from '../services/screeningService
 
 export const screenRouter = Router();
 
+// Groq (and most providers) surface rate limits as a 429 with a `status`
+// field on the error object. We detect that specifically so the UI can show
+// a clear, expected message instead of a generic failure.
+function friendlyErrorMessage(err: any): { status: number; message: string } {
+  const status = err?.status || err?.response?.status;
+  if (status === 429) {
+    return {
+      status: 429,
+      message: "Rate limit hit — please wait about 30 seconds and try again.",
+    };
+  }
+  return { status: 500, message: 'Failed to analyze job fit. Please try again.' };
+}
+
 screenRouter.post('/screen', async (req: Request, res: Response) => {
   const { resume, jobDescription } = req.body;
 
@@ -16,7 +30,8 @@ screenRouter.post('/screen', async (req: Request, res: Response) => {
     res.json(result);
   } catch (err) {
     console.error('Screening error:', err);
-    res.status(500).json({ error: 'Failed to analyze job fit' });
+    const { status, message } = friendlyErrorMessage(err);
+    res.status(status).json({ error: message });
   }
 });
 
@@ -40,7 +55,8 @@ screenRouter.post('/screen/stream', async (req: Request, res: Response) => {
     res.end();
   } catch (err) {
     console.error('Stream error:', err);
-    res.write(`data: ${JSON.stringify({ error: 'Stream failed' })}\n\n`);
+    const { message } = friendlyErrorMessage(err);
+    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
     res.end();
   }
 });

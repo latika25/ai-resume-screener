@@ -26,7 +26,6 @@ function recLabel(r: string) {
   return { label: 'Skip This One', color: 'var(--red)' };
 }
 
-// ── Sub-components ─────────────────────────────────────────────────────────
 function ScoreRing({ score }: { score: number }) {
   const r = 54;
   const circ = 2 * Math.PI * r;
@@ -95,6 +94,79 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
   );
 }
 
+function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={`${keyPrefix}-${i}`}>{part.slice(2, -2)}</strong>;
+    }
+    return <React.Fragment key={`${keyPrefix}-${i}`}>{part}</React.Fragment>;
+  });
+}
+
+function isTableRow(line: string) {
+  const t = line.trim();
+  return t.startsWith('|') && t.endsWith('|') && t.length > 1;
+}
+
+function isTableSeparator(line: string) {
+  return /^\|?[\s:-]+\|[\s:|-]*$/.test(line.trim());
+}
+
+function renderStreamedMarkdown(text: string): React.ReactNode[] {
+  const lines = text.split('\n');
+  const blocks: React.ReactNode[] = [];
+  let i = 0;
+  let key = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (isTableRow(line)) {
+      const tableLines: string[] = [];
+      while (i < lines.length && isTableRow(lines[i])) {
+        tableLines.push(lines[i]);
+        i++;
+      }
+      const rows = tableLines
+        .filter(l => !isTableSeparator(l))
+        .map(l => l.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim()));
+
+      blocks.push(
+        <table key={`tbl-${key++}`} style={{ width: '100%', borderCollapse: 'collapse', margin: '10px 0 16px' }}>
+          <tbody>
+            {rows.map((cells, ri) => (
+              <tr key={ri} style={{ borderBottom: '1px solid var(--border)' }}>
+                {cells.map((cell, ci) => (
+                  <td key={ci} style={{ padding: '7px 12px', verticalAlign: 'top', fontSize: 13, color: 'var(--text)' }}>
+                    {renderInline(cell, `c-${key}-${ri}-${ci}`)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      );
+      continue;
+    }
+
+    if (line.trim() === '') {
+      blocks.push(<div key={`sp-${key++}`} style={{ height: 6 }} />);
+      i++;
+      continue;
+    }
+
+    blocks.push(
+      <p key={`p-${key++}`} style={{ margin: '0 0 8px 0', fontSize: 13, lineHeight: 1.8, color: 'var(--text)' }}>
+        {renderInline(line, `l-${key}`)}
+      </p>
+    );
+    i++;
+  }
+
+  return blocks;
+}
+
 // ── Main App ───────────────────────────────────────────────────────────────
 export default function App() {
   const [resume, setResume] = useState('');
@@ -102,8 +174,29 @@ export default function App() {
   const [mode, setMode] = useState<Mode>('idle');
   const [result, setResult] = useState<ScreeningResult | null>(null);
   const [streamText, setStreamText] = useState('');
+  const [displayText, setDisplayText] = useState('');
   const [error, setError] = useState('');
   const abortRef = useRef<AbortController | null>(null);
+  const queueRef = useRef('');
+  const typeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const startTypewriter = useCallback(() => {
+    if (typeIntervalRef.current) return;
+    typeIntervalRef.current = setInterval(() => {
+      setDisplayText(prev => {
+        if (queueRef.current.length === 0) {
+          if (typeIntervalRef.current) {
+            clearInterval(typeIntervalRef.current);
+            typeIntervalRef.current = null;
+          }
+          return prev;
+        }
+        const take = queueRef.current.slice(0, 3);
+        queueRef.current = queueRef.current.slice(3);
+        return prev + take;
+      });
+    }, 18);
+  }, []);
 
   const analyze = useCallback(async () => {
     if (!resume.trim() || !jd.trim()) return;
@@ -118,7 +211,10 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ resume, jobDescription: jd }),
       });
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || `Server error: ${res.status}`);
+      }
       const data: ScreeningResult = await res.json();
       setResult(data);
       setMode('done');
@@ -133,7 +229,13 @@ export default function App() {
     setMode('streaming');
     setResult(null);
     setStreamText('');
+    setDisplayText('');
     setError('');
+    queueRef.current = '';
+    if (typeIntervalRef.current) {
+      clearInterval(typeIntervalRef.current);
+      typeIntervalRef.current = null;
+    }
 
     abortRef.current = new AbortController();
 
@@ -162,7 +264,16 @@ export default function App() {
           if (payload === '[DONE]') { setMode('done'); return; }
           try {
             const parsed = JSON.parse(payload);
-            if (parsed.text) setStreamText(prev => prev + parsed.text);
+            if (parsed.error) {
+              setError(parsed.error);
+              setMode('error');
+              return;
+            }
+            if (parsed.text) {
+              setStreamText(prev => prev + parsed.text);
+              queueRef.current += parsed.text;
+              startTypewriter();
+            }
           } catch {}
         }
       }
@@ -177,9 +288,15 @@ export default function App() {
 
   const reset = () => {
     abortRef.current?.abort();
+    if (typeIntervalRef.current) {
+      clearInterval(typeIntervalRef.current);
+      typeIntervalRef.current = null;
+    }
+    queueRef.current = '';
     setMode('idle');
     setResult(null);
     setStreamText('');
+    setDisplayText('');
     setError('');
   };
 
@@ -329,7 +446,7 @@ export default function App() {
               animation: 'spin 0.8s linear infinite',
               margin: '0 auto 16px',
             }} />
-            <p>Claude is reading your resume…</p>
+            <p>Reading your resume…</p>
             <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
           </div>
         )}
@@ -366,18 +483,14 @@ export default function App() {
             }}>
               {mode === 'streaming' ? '⟳ Live Analysis' : 'Analysis Complete'}
             </p>
-            <pre style={{
-              whiteSpace: 'pre-wrap',
-              fontFamily: 'var(--font-body)',
-              fontSize: 13,
-              color: 'var(--text)',
-              lineHeight: 1.8,
-            }}>{streamText}{mode === 'streaming' && <span style={{
-              display: 'inline-block', width: 2, height: 14,
-              background: 'var(--accent-bright)',
-              animation: 'blink 1s step-end infinite', marginLeft: 2, verticalAlign: 'middle',
-            }} />}
-            </pre>
+            <div style={{ fontFamily: 'var(--font-body)' }}>
+              {renderStreamedMarkdown(displayText)}
+              {mode === 'streaming' && <span style={{
+                display: 'inline-block', width: 2, height: 14,
+                background: 'var(--accent-bright)',
+                animation: 'blink 1s step-end infinite', marginLeft: 2, verticalAlign: 'middle',
+              }} />}
+            </div>
             <style>{`@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }`}</style>
           </div>
         )}
@@ -480,7 +593,7 @@ export default function App() {
         color: 'var(--text-muted)',
         fontSize: 12,
       }}>
-        Built with Claude API · Node.js · TypeScript · React
+        Built with Node.js · TypeScript · React
       </footer>
     </div>
   );
