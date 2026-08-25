@@ -174,29 +174,8 @@ export default function App() {
   const [mode, setMode] = useState<Mode>('idle');
   const [result, setResult] = useState<ScreeningResult | null>(null);
   const [streamText, setStreamText] = useState('');
-  const [displayText, setDisplayText] = useState('');
   const [error, setError] = useState('');
   const abortRef = useRef<AbortController | null>(null);
-  const queueRef = useRef('');
-  const typeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const startTypewriter = useCallback(() => {
-    if (typeIntervalRef.current) return;
-    typeIntervalRef.current = setInterval(() => {
-      setDisplayText(prev => {
-        if (queueRef.current.length === 0) {
-          if (typeIntervalRef.current) {
-            clearInterval(typeIntervalRef.current);
-            typeIntervalRef.current = null;
-          }
-          return prev;
-        }
-        const take = queueRef.current.slice(0, 3);
-        queueRef.current = queueRef.current.slice(3);
-        return prev + take;
-      });
-    }, 18);
-  }, []);
 
   const analyze = useCallback(async () => {
     if (!resume.trim() || !jd.trim()) return;
@@ -229,13 +208,7 @@ export default function App() {
     setMode('streaming');
     setResult(null);
     setStreamText('');
-    setDisplayText('');
     setError('');
-    queueRef.current = '';
-    if (typeIntervalRef.current) {
-      clearInterval(typeIntervalRef.current);
-      typeIntervalRef.current = null;
-    }
 
     abortRef.current = new AbortController();
 
@@ -271,8 +244,6 @@ export default function App() {
             }
             if (parsed.text) {
               setStreamText(prev => prev + parsed.text);
-              queueRef.current += parsed.text;
-              startTypewriter();
             }
           } catch {}
         }
@@ -288,15 +259,9 @@ export default function App() {
 
   const reset = () => {
     abortRef.current?.abort();
-    if (typeIntervalRef.current) {
-      clearInterval(typeIntervalRef.current);
-      typeIntervalRef.current = null;
-    }
-    queueRef.current = '';
     setMode('idle');
     setResult(null);
     setStreamText('');
-    setDisplayText('');
     setError('');
   };
 
@@ -484,7 +449,7 @@ export default function App() {
               {mode === 'streaming' ? '⟳ Live Analysis' : 'Analysis Complete'}
             </p>
             <div style={{ fontFamily: 'var(--font-body)' }}>
-              {renderStreamedMarkdown(displayText)}
+              {renderStreamedMarkdown(streamText)}
               {mode === 'streaming' && <span style={{
                 display: 'inline-block', width: 2, height: 14,
                 background: 'var(--accent-bright)',

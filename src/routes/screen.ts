@@ -3,18 +3,20 @@ import { analyzeJobFit, analyzeJobFitStream } from '../services/screeningService
 
 export const screenRouter = Router();
 
-// Groq (and most providers) surface rate limits as a 429 with a `status`
-// field on the error object. We detect that specifically so the UI can show
-// a clear, expected message instead of a generic failure.
 function friendlyErrorMessage(err: any): { status: number; message: string } {
   const status = err?.status || err?.response?.status;
+
   if (status === 429) {
     return {
       status: 429,
-      message: "Rate limit hit — please wait about 30 seconds and try again.",
+      message: 'Rate limit hit — please wait about 30 seconds and try again.',
     };
   }
-  return { status: 500, message: 'Failed to analyze job fit. Please try again.' };
+
+  return {
+    status: 500,
+    message: 'Failed to analyze job fit. Please try again.',
+  };
 }
 
 screenRouter.post('/screen', async (req: Request, res: Response) => {
@@ -43,20 +45,44 @@ screenRouter.post('/screen/stream', async (req: Request, res: Response) => {
     return;
   }
 
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.status(200);
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+
+  if (typeof res.flushHeaders === 'function') {
+    res.flushHeaders();
+  }
+
+  const keepAlive = setInterval(() => {
+    res.write(': keep-alive\n\n');
+  }, 15000);
+
+  req.on('close', () => {
+    clearInterval(keepAlive);
+  });
 
   try {
     await analyzeJobFitStream(resume, jobDescription, (chunk) => {
-      res.write(`data: ${JSON.stringify({ text: chunk })}\n\n`);
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ text: chunk })}\n\n`);
+      }
     });
-    res.write('data: [DONE]\n\n');
-    res.end();
+
+    if (!res.writableEnded) {
+      res.write('data: [DONE]\n\n');
+      res.end();
+    }
   } catch (err) {
     console.error('Stream error:', err);
-    const { message } = friendlyErrorMessage(err);
-    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
-    res.end();
+
+    if (!res.writableEnded) {
+      const { message } = friendlyErrorMessage(err);
+      res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+      res.end();
+    }
+  } finally {
+    clearInterval(keepAlive);
   }
 });
