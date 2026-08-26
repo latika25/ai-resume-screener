@@ -17,13 +17,13 @@ An AI-powered tool that analyzes resume–job description fit using the Anthropi
 
 ## Tech Stack
 
-| Layer | Tech |
-|---|---|
-| Backend | Node.js, TypeScript, Express.js |
-| Frontend | React, TypeScript |
-| AI | Anthropic Claude API (`claude-sonnet-4-20250514`) |
-| Streaming | Server-Sent Events (SSE) |
-| Infra | Docker-ready, deployable to AWS/Railway/Render |
+| Layer     | Tech                                              |
+| --------- | ------------------------------------------------- |
+| Backend   | Node.js, TypeScript, Express.js                   |
+| Frontend  | React, TypeScript                                 |
+| AI        | Anthropic Claude API (`claude-sonnet-4-20250514`) |
+| Streaming | Server-Sent Events (SSE)                          |
+| Infra     | Docker-ready, deployable to AWS/Railway/Render    |
 
 ## Getting Started
 
@@ -52,9 +52,11 @@ Get your free Anthropic API key at [console.anthropic.com](https://console.anthr
 ## API Reference
 
 ### `POST /api/screen`
+
 Structured JSON analysis.
 
 **Request:**
+
 ```json
 {
   "resume": "your resume text",
@@ -63,6 +65,7 @@ Structured JSON analysis.
 ```
 
 **Response:**
+
 ```json
 {
   "matchScore": 82,
@@ -76,9 +79,11 @@ Structured JSON analysis.
 ```
 
 ### `POST /api/screen/stream`
+
 Same request body — streams analysis as Server-Sent Events in real time.
 
 ### `GET /health`
+
 Returns `{ status: "ok" }`.
 
 ## Project Structure

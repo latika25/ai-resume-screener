@@ -1,5 +1,5 @@
-import Groq from 'groq-sdk';
-import dotenv from 'dotenv';
+import Groq from "groq-sdk";
+import dotenv from "dotenv";
 
 dotenv.config();
 
@@ -7,7 +7,7 @@ const client = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
-const MODEL = 'openai/gpt-oss-120b';
+const MODEL = "openai/gpt-oss-120b";
 
 export interface ScoreBreakdown {
   technicalSkills: number;
@@ -24,7 +24,7 @@ export interface ScreeningResult {
   missingSkills: string[];
   strengths: string[];
   gaps: string[];
-  recommendation: 'apply' | 'maybe' | 'skip';
+  recommendation: "apply" | "maybe" | "skip";
   tailoredSummary: string;
 }
 
@@ -79,28 +79,27 @@ technicalSkills
 
 export async function analyzeJobFit(
   resume: string,
-  jobDescription: string
+  jobDescription: string,
 ): Promise<ScreeningResult> {
-  const response =
-    await client.chat.completions.create({
-      model: MODEL,
+  const response = await client.chat.completions.create({
+    model: MODEL,
 
-      /*
-       * Temperature 0 makes the scoring as
-       * deterministic as possible.
-       */
-      temperature: 0,
+    /*
+     * Temperature 0 makes the scoring as
+     * deterministic as possible.
+     */
+    temperature: 0,
 
-      max_completion_tokens: 1600,
+    max_completion_tokens: 1600,
 
-      response_format: {
-        type: 'json_object',
-      },
+    response_format: {
+      type: "json_object",
+    },
 
-      messages: [
-        {
-          role: 'system',
-          content: `
+    messages: [
+      {
+        role: "system",
+        content: `
 ${SCORING_CONTRACT}
 
 Return ONLY valid JSON.
@@ -111,11 +110,11 @@ Do not include:
 - explanations outside JSON
 - internal reasoning
 `,
-        },
+      },
 
-        {
-          role: 'user',
-          content: `
+      {
+        role: "user",
+        content: `
 Analyze this resume against the job description.
 
 Resume:
@@ -164,22 +163,18 @@ Rules:
 - Do not give credit for technologies merely
   because they are common in the industry.
 `,
-        },
-      ],
-    });
+      },
+    ],
+  });
 
-  const text =
-    response.choices[0]?.message?.content?.trim();
+  const text = response.choices[0]?.message?.content?.trim();
 
   if (!text) {
-    throw new Error(
-      'Empty response from Groq.'
-    );
+    throw new Error("Empty response from Groq.");
   }
 
   try {
-    const result =
-      JSON.parse(text) as ScreeningResult;
+    const result = JSON.parse(text) as ScreeningResult;
 
     /*
      * Defensive defaults.
@@ -188,33 +183,23 @@ Rules:
      * undefined values for fields that it expects
      * to be arrays.
      */
-    result.matchedSkills =
-      Array.isArray(result.matchedSkills)
-        ? result.matchedSkills
-        : [];
+    result.matchedSkills = Array.isArray(result.matchedSkills)
+      ? result.matchedSkills
+      : [];
 
-    result.missingSkills =
-      Array.isArray(result.missingSkills)
-        ? result.missingSkills
-        : [];
+    result.missingSkills = Array.isArray(result.missingSkills)
+      ? result.missingSkills
+      : [];
 
-    result.strengths =
-      Array.isArray(result.strengths)
-        ? result.strengths
-        : [];
+    result.strengths = Array.isArray(result.strengths) ? result.strengths : [];
 
-    result.gaps =
-      Array.isArray(result.gaps)
-        ? result.gaps
-        : [];
+    result.gaps = Array.isArray(result.gaps) ? result.gaps : [];
 
     /*
      * Make sure scoreBreakdown exists.
      */
     if (!result.scoreBreakdown) {
-      throw new Error(
-        'Missing scoreBreakdown in model response.'
-      );
+      throw new Error("Missing scoreBreakdown in model response.");
     }
 
     /*
@@ -222,30 +207,19 @@ Rules:
      * trusting the model's matchScore.
      */
     const calculatedScore =
-      result.scoreBreakdown
-        .technicalSkills +
-      result.scoreBreakdown
-        .relevantExperience +
-      result.scoreBreakdown
-        .growthProduct +
-      result.scoreBreakdown
-        .roleSpecific +
-      result.scoreBreakdown
-        .ownershipCollaboration;
+      result.scoreBreakdown.technicalSkills +
+      result.scoreBreakdown.relevantExperience +
+      result.scoreBreakdown.growthProduct +
+      result.scoreBreakdown.roleSpecific +
+      result.scoreBreakdown.ownershipCollaboration;
 
-    result.matchScore =
-      calculatedScore;
+    result.matchScore = calculatedScore;
 
     return result;
   } catch (error) {
-    console.error(
-      'Failed to parse JSON:',
-      text
-    );
+    console.error("Failed to parse JSON:", text);
 
-    throw new Error(
-      'Invalid JSON returned by model.'
-    );
+    throw new Error("Invalid JSON returned by model.");
   }
 }
 
@@ -256,27 +230,26 @@ Rules:
 export async function analyzeJobFitStream(
   resume: string,
   jobDescription: string,
-  onChunk: (chunk: string) => void
+  onChunk: (chunk: string) => void,
 ): Promise<void> {
-  const stream =
-    await client.chat.completions.create({
-      model: MODEL,
+  const stream = await client.chat.completions.create({
+    model: MODEL,
 
-      /*
-       * Keep this identical to the normal
-       * analysis so the two modes use the
-       * same sampling behavior.
-       */
-      temperature: 0,
+    /*
+     * Keep this identical to the normal
+     * analysis so the two modes use the
+     * same sampling behavior.
+     */
+    temperature: 0,
 
-      max_completion_tokens: 1600,
+    max_completion_tokens: 1600,
 
-      stream: true,
+    stream: true,
 
-      messages: [
-        {
-          role: 'system',
-          content: `
+    messages: [
+      {
+        role: "system",
+        content: `
 ${SCORING_CONTRACT}
 
 Write only the final candidate-facing analysis.
@@ -284,11 +257,11 @@ Write only the final candidate-facing analysis.
 Do not expose internal reasoning.
 Do not output JSON.
 `,
-        },
+      },
 
-        {
-          role: 'user',
-          content: `
+      {
+        role: "user",
+        content: `
 Analyze this resume against the job description.
 
 Resume:
@@ -357,9 +330,9 @@ Important:
 - Do not output code.
 - Do not output internal reasoning.
 `,
-        },
-      ],
-    });
+      },
+    ],
+  });
 
   /*
    * Track how many chunks Groq actually sends.
@@ -371,19 +344,12 @@ Important:
   let chunkCount = 0;
 
   for await (const chunk of stream) {
-    const text =
-      chunk.choices[0]?.delta?.content;
+    const text = chunk.choices[0]?.delta?.content;
 
-    if (
-      typeof text === 'string' &&
-      text.length > 0
-    ) {
+    if (typeof text === "string" && text.length > 0) {
       chunkCount++;
 
-      console.log(
-        `GROQ CHUNK ${chunkCount}:`,
-        JSON.stringify(text)
-      );
+      console.log(`GROQ CHUNK ${chunkCount}:`, JSON.stringify(text));
 
       /*
        * Immediately forward the chunk
@@ -393,7 +359,5 @@ Important:
     }
   }
 
-  console.log(
-    `GROQ STREAM COMPLETE — ${chunkCount} chunks received`
-  );
+  console.log(`GROQ STREAM COMPLETE — ${chunkCount} chunks received`);
 }
