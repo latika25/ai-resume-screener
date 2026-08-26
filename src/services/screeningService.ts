@@ -9,38 +9,114 @@ const client = new Groq({
 
 const MODEL = 'openai/gpt-oss-120b';
 
+export interface ScoreBreakdown {
+  technicalSkills: number;
+  relevantExperience: number;
+  growthProduct: number;
+  roleSpecific: number;
+  ownershipCollaboration: number;
+}
+
 export interface ScreeningResult {
   matchScore: number;
+  scoreBreakdown: ScoreBreakdown;
   matchedSkills: string[];
   missingSkills: string[];
   strengths: string[];
   gaps: string[];
-  recommendation: string;
+  recommendation: 'apply' | 'maybe' | 'skip';
   tailoredSummary: string;
 }
+
+/* -------------------------------------------------------------------------- */
+/* SHARED SCORING CONTRACT                                                    */
+/* -------------------------------------------------------------------------- */
+
+const SCORING_CONTRACT = `
+You are an expert technical recruiter.
+
+Evaluate the candidate using EXACTLY these dimensions:
+
+1. technicalSkills (0-30)
+   Core technical skills required by the role.
+
+2. relevantExperience (0-25)
+   Relevance of professional experience and responsibilities.
+
+3. growthProduct (0-20)
+   Growth engineering, experimentation, metrics, conversion,
+   product thinking, user impact.
+
+4. roleSpecific (0-15)
+   Role-specific tools, frameworks, technologies, and domain
+   requirements mentioned in the job description.
+
+5. ownershipCollaboration (0-10)
+   Ownership, communication, collaboration, remote work,
+   leadership, initiative.
+
+SCORING RULES:
+
+- Only score based on evidence explicitly present in the resume.
+- Do not invent skills or experience.
+- Direct experience gets full credit.
+- Transferable experience gets partial credit.
+- Missing experience gets no direct-match credit.
+- Match score must equal:
+
+technicalSkills
++ relevantExperience
++ growthProduct
++ roleSpecific
++ ownershipCollaboration
+
+- matchScore must be between 0 and 100.
+`;
+
+/* -------------------------------------------------------------------------- */
+/* NORMAL ANALYSIS                                                            */
+/* -------------------------------------------------------------------------- */
 
 export async function analyzeJobFit(
   resume: string,
   jobDescription: string
 ): Promise<ScreeningResult> {
-  const response = await client.chat.completions.create({
-    model: MODEL,
-    max_completion_tokens: 2000,
-    temperature: 0.6,
-    reasoning_effort: 'low',
-    include_reasoning: false,
-    response_format: {
-      type: 'json_object',
-    },
-    messages: [
-      {
-        role: 'system',
-        content:
-          'You are an expert technical recruiter. Return only valid JSON. Do not include markdown, code fences, preambles, or internal reasoning.',
+  const response =
+    await client.chat.completions.create({
+      model: MODEL,
+
+      /*
+       * Temperature 0 makes the scoring as
+       * deterministic as possible.
+       */
+      temperature: 0,
+
+      max_completion_tokens: 1600,
+
+      response_format: {
+        type: 'json_object',
       },
-      {
-        role: 'user',
-        content: `Analyze this resume against the job description.
+
+      messages: [
+        {
+          role: 'system',
+          content: `
+${SCORING_CONTRACT}
+
+Return ONLY valid JSON.
+
+Do not include:
+- markdown
+- code fences
+- explanations outside JSON
+- internal reasoning
+`,
+        },
+
+        {
+          role: 'user',
+          content: `
+Analyze this resume against the job description.
 
 Resume:
 ${resume}
@@ -48,61 +124,172 @@ ${resume}
 Job Description:
 ${jobDescription}
 
-Return this exact JSON structure:
+Return EXACTLY this JSON structure:
+
 {
-  "matchScore": <number 0-100>,
-  "matchedSkills": [<skills present in both resume and JD>],
-  "missingSkills": [<skills in JD but not in resume>],
-  "strengths": [<2-3 strong alignment points>],
-  "gaps": [<2-3 key gaps>],
-  "recommendation": "<apply|maybe|skip>",
-  "tailoredSummary": "<2 sentence resume summary tailored to this specific JD>"
+  "matchScore": 0,
+  "scoreBreakdown": {
+    "technicalSkills": 0,
+    "relevantExperience": 0,
+    "growthProduct": 0,
+    "roleSpecific": 0,
+    "ownershipCollaboration": 0
+  },
+  "matchedSkills": [],
+  "missingSkills": [],
+  "strengths": [],
+  "gaps": [],
+  "recommendation": "",
+  "tailoredSummary": ""
 }
 
 Rules:
-- Do not invent experience or skills.
-- Keep the analysis factual and concise.
-- recommendation must be exactly apply, maybe, or skip.
-- tailoredSummary must be exactly two professional sentences.`,
-      },
-    ],
-  });
 
-  const text = response.choices[0]?.message?.content?.trim() || '';
+- recommendation must be exactly:
+  "apply"
+  "maybe"
+  "skip"
+
+- strengths: 2-5 items
+- gaps: 2-5 items
+- matchedSkills: most important overlaps
+- missingSkills: important missing requirements
+- tailoredSummary: exactly 2 professional sentences
+
+- matchScore MUST equal the sum of the
+  five scoreBreakdown values.
+
+- Do not invent experience.
+- Do not invent skills.
+- Do not give credit for technologies merely
+  because they are common in the industry.
+`,
+        },
+      ],
+    });
+
+  const text =
+    response.choices[0]?.message?.content?.trim();
 
   if (!text) {
-    throw new Error('Groq returned an empty analysis response.');
+    throw new Error(
+      'Empty response from Groq.'
+    );
   }
 
   try {
-    return JSON.parse(text) as ScreeningResult;
+    const result =
+      JSON.parse(text) as ScreeningResult;
+
+    /*
+     * Defensive defaults.
+     *
+     * This prevents the frontend from receiving
+     * undefined values for fields that it expects
+     * to be arrays.
+     */
+    result.matchedSkills =
+      Array.isArray(result.matchedSkills)
+        ? result.matchedSkills
+        : [];
+
+    result.missingSkills =
+      Array.isArray(result.missingSkills)
+        ? result.missingSkills
+        : [];
+
+    result.strengths =
+      Array.isArray(result.strengths)
+        ? result.strengths
+        : [];
+
+    result.gaps =
+      Array.isArray(result.gaps)
+        ? result.gaps
+        : [];
+
+    /*
+     * Make sure scoreBreakdown exists.
+     */
+    if (!result.scoreBreakdown) {
+      throw new Error(
+        'Missing scoreBreakdown in model response.'
+      );
+    }
+
+    /*
+     * Calculate the score ourselves rather than
+     * trusting the model's matchScore.
+     */
+    const calculatedScore =
+      result.scoreBreakdown
+        .technicalSkills +
+      result.scoreBreakdown
+        .relevantExperience +
+      result.scoreBreakdown
+        .growthProduct +
+      result.scoreBreakdown
+        .roleSpecific +
+      result.scoreBreakdown
+        .ownershipCollaboration;
+
+    result.matchScore =
+      calculatedScore;
+
+    return result;
   } catch (error) {
-    console.error('Failed to parse Groq JSON response:', text);
-    throw new Error('Groq returned an invalid JSON response.');
+    console.error(
+      'Failed to parse JSON:',
+      text
+    );
+
+    throw new Error(
+      'Invalid JSON returned by model.'
+    );
   }
 }
+
+/* -------------------------------------------------------------------------- */
+/* STREAMING ANALYSIS                                                         */
+/* -------------------------------------------------------------------------- */
 
 export async function analyzeJobFitStream(
   resume: string,
   jobDescription: string,
   onChunk: (chunk: string) => void
 ): Promise<void> {
-  const stream = await client.chat.completions.create({
-    model: MODEL,
-    max_completion_tokens: 2500,
-    temperature: 0.6,
-    reasoning_effort: 'low',
-    include_reasoning: false,
-    stream: true,
-    messages: [
-      {
-        role: 'system',
-        content:
-          'You are an expert technical recruiter. Write only the final answer for the user. Do not expose internal reasoning.',
-      },
-      {
-        role: 'user',
-        content: `Analyze this resume against the job description.
+  const stream =
+    await client.chat.completions.create({
+      model: MODEL,
+
+      /*
+       * Keep this identical to the normal
+       * analysis so the two modes use the
+       * same sampling behavior.
+       */
+      temperature: 0,
+
+      max_completion_tokens: 1600,
+
+      stream: true,
+
+      messages: [
+        {
+          role: 'system',
+          content: `
+${SCORING_CONTRACT}
+
+Write only the final candidate-facing analysis.
+
+Do not expose internal reasoning.
+Do not output JSON.
+`,
+        },
+
+        {
+          role: 'user',
+          content: `
+Analyze this resume against the job description.
 
 Resume:
 ${resume}
@@ -110,47 +297,103 @@ ${resume}
 Job Description:
 ${jobDescription}
 
-Provide a clear professional analysis using exactly these sections:
+Provide the analysis using EXACTLY these sections.
 
-## Overall Fit
-Give a match score from 0-100 and briefly explain the fit.
+# Overall Fit
 
-## Matched Skills
-List important skills and technologies from the job description that are demonstrated in the resume.
+Show:
 
-## Missing Skills
-List important requirements from the job description that are missing or not clearly demonstrated.
+Technical Skills: X/30
+Relevant Experience: X/25
+Growth/Product: X/20
+Role Specific: X/15
+Ownership & Collaboration: X/10
 
-## Key Strengths
-List 3-5 concise strengths that make the candidate a good match.
+Match Score: X/100
 
-## Gaps to Address
-List 2-4 important gaps or weaknesses.
+The Match Score MUST equal the sum of
+the five component scores.
 
-## Recommendation
-Clearly state Apply, Maybe Apply, or Skip, then briefly explain why.
+Briefly explain the score.
 
-## Tailored Resume Summary
-Write a concise, professional 2-3 sentence summary tailored specifically to this job.
+# Matched Skills
+
+List the most important matching skills.
+
+# Missing Skills
+
+List important missing requirements.
+
+# Key Strengths
+
+Provide 2-5 strengths.
+
+# Gaps to Address
+
+Provide 2-5 gaps.
+
+# Recommendation
+
+State exactly one:
+
+Apply
+Maybe Apply
+Skip
+
+Then briefly explain why.
+
+# Tailored Resume Summary
+
+Write exactly two professional sentences.
 
 Important:
-- Use natural, professional English.
-- Be factual and concise.
-- Do not invent experience, skills, companies, or technologies.
+
+- Use concise professional English.
+- Use the exact scoring methodology above.
+- Do not invent experience.
+- Do not invent skills.
 - Do not output JSON.
 - Do not output tables.
 - Do not output code.
 - Do not output internal reasoning.
-- Output only the final analysis intended for the candidate.`,
-      },
-    ],
-  });
+`,
+        },
+      ],
+    });
+
+  /*
+   * Track how many chunks Groq actually sends.
+   *
+   * This is intentionally here for debugging.
+   * Once we confirm streaming is working,
+   * these logs can be removed.
+   */
+  let chunkCount = 0;
 
   for await (const chunk of stream) {
-    const text = chunk.choices[0]?.delta?.content;
+    const text =
+      chunk.choices[0]?.delta?.content;
 
-    if (typeof text === 'string' && text.length > 0) {
+    if (
+      typeof text === 'string' &&
+      text.length > 0
+    ) {
+      chunkCount++;
+
+      console.log(
+        `GROQ CHUNK ${chunkCount}:`,
+        JSON.stringify(text)
+      );
+
+      /*
+       * Immediately forward the chunk
+       * to screen.ts.
+       */
       onChunk(text);
     }
   }
+
+  console.log(
+    `GROQ STREAM COMPLETE — ${chunkCount} chunks received`
+  );
 }
