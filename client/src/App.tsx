@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
 
 interface ScreeningResult {
   matchScore: number;
@@ -26,9 +26,59 @@ export function scoreColor(score: number) {
 }
 
 export function recLabel(r: string) {
-  if (r === "apply") return { label: "Strong Apply", color: "var(--green)" };
-  if (r === "maybe") return { label: "Worth Trying", color: "var(--yellow)" };
-  return { label: "Skip This One", color: "var(--red)" };
+  if (r === "apply") {
+    return {
+      label: "Strong Apply",
+      color: "var(--green)",
+    };
+  }
+
+  if (r === "maybe") {
+    return {
+      label: "Worth Trying",
+      color: "var(--yellow)",
+    };
+  }
+
+  return {
+    label: "Skip This One",
+    color: "var(--red)",
+  };
+}
+
+/**
+ * Protect the UI from incomplete or malformed model responses.
+ *
+ * Some model responses may omit an array field.
+ * The UI should still render safely instead of calling
+ * .map() on undefined.
+ */
+function normalizeScreeningResult(
+  data: Partial<ScreeningResult>,
+): ScreeningResult {
+  return {
+    matchScore: typeof data.matchScore === "number" ? data.matchScore : 0,
+
+    scoreBreakdown: data.scoreBreakdown,
+
+    matchedSkills: Array.isArray(data.matchedSkills) ? data.matchedSkills : [],
+
+    missingSkills: Array.isArray(data.missingSkills) ? data.missingSkills : [],
+
+    strengths: Array.isArray(data.strengths) ? data.strengths : [],
+
+    gaps: Array.isArray(data.gaps) ? data.gaps : [],
+
+    recommendation:
+      data.recommendation === "apply" ||
+      data.recommendation === "maybe" ||
+      data.recommendation === "skip"
+        ? data.recommendation
+        : "maybe",
+
+    tailoredSummary:
+      typeof data.tailoredSummary === "string" ? data.tailoredSummary : "",
+  };
 }
 
 function ScoreRing({ score }: { score: number }) {
@@ -65,7 +115,9 @@ function ScoreRing({ score }: { score: number }) {
           strokeDasharray={`${fill} ${circ}`}
           strokeLinecap="round"
           transform="rotate(-90 70 70)"
-          style={{ transition: "stroke-dasharray 1s ease" }}
+          style={{
+            transition: "stroke-dasharray 1s ease",
+          }}
         />
 
         <text
@@ -168,6 +220,7 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
 
 export function isTableRow(line: string) {
   const t = line.trim();
+
   return t.startsWith("|") && t.endsWith("|") && t.length > 1;
 }
 
@@ -177,7 +230,9 @@ export function isTableSeparator(line: string) {
 
 function renderStreamedMarkdown(text: string): React.ReactNode[] {
   const lines = text.split("\n");
+
   const blocks: React.ReactNode[] = [];
+
   let i = 0;
   let key = 0;
 
@@ -241,7 +296,6 @@ function renderStreamedMarkdown(text: string): React.ReactNode[] {
       continue;
     }
 
-    // Empty line
     if (line.trim() === "") {
       blocks.push(<div key={`sp-${key++}`} style={{ height: 6 }} />);
 
@@ -249,7 +303,6 @@ function renderStreamedMarkdown(text: string): React.ReactNode[] {
       continue;
     }
 
-    // Normal paragraph
     blocks.push(
       <p
         key={`p-${key++}`}
@@ -273,6 +326,7 @@ function renderStreamedMarkdown(text: string): React.ReactNode[] {
 export default function App() {
   const [resume, setResume] = useState("");
   const [jd, setJd] = useState("");
+
   const [mode, setMode] = useState<Mode>("idle");
 
   const [result, setResult] = useState<ScreeningResult | null>(null);
@@ -285,8 +339,103 @@ export default function App() {
 
   const abortRef = useRef<AbortController | null>(null);
 
+  const streamQueueRef = useRef<string[]>([]);
+
+  const streamNetworkFinishedRef = useRef(false);
+
+  const streamDisplayTimerRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
+
+  const startStreamDisplay = useCallback(() => {
+    if (streamDisplayTimerRef.current) {
+      return;
+    }
+
+    streamDisplayTimerRef.current = setInterval(() => {
+      const queue = streamQueueRef.current;
+
+      if (queue.length === 0) {
+        if (streamNetworkFinishedRef.current) {
+          if (streamDisplayTimerRef.current) {
+            clearInterval(streamDisplayTimerRef.current);
+
+            streamDisplayTimerRef.current = null;
+          }
+
+          setMode("done");
+        }
+
+        return;
+      }
+
+      let charactersToDisplay = 12;
+      let output = "";
+
+      while (charactersToDisplay > 0 && queue.length > 0) {
+        const current = queue[0];
+
+        if (current.length <= charactersToDisplay) {
+          output += current;
+
+          charactersToDisplay -= current.length;
+
+          queue.shift();
+        } else {
+          output += current.slice(0, charactersToDisplay);
+
+          queue[0] = current.slice(charactersToDisplay);
+
+          charactersToDisplay = 0;
+        }
+      }
+
+      if (output.length > 0) {
+        setStreamStarted(true);
+
+        setStreamText((previous) => previous + output);
+      }
+    }, 30);
+  }, []);
+
+  /**
+   * Stop the display timer.
+   */
+  const stopStreamDisplay = useCallback(() => {
+    if (streamDisplayTimerRef.current) {
+      clearInterval(streamDisplayTimerRef.current);
+
+      streamDisplayTimerRef.current = null;
+    }
+  }, []);
+
+  /**
+   * Clean up streaming resources when the component
+   * unmounts.
+   */
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+
+      if (streamDisplayTimerRef.current) {
+        clearInterval(streamDisplayTimerRef.current);
+      }
+    };
+  }, []);
+
+  /**
+   * Normal Analyze Match.
+   */
   const analyze = useCallback(async () => {
-    if (!resume.trim() || !jd.trim()) return;
+    if (!resume.trim() || !jd.trim()) {
+      return;
+    }
+
+    stopStreamDisplay();
+
+    streamQueueRef.current = [];
+
+    streamNetworkFinishedRef.current = false;
 
     setMode("loading");
     setResult(null);
@@ -312,19 +461,40 @@ export default function App() {
         throw new Error(body?.error || `Server error: ${res.status}`);
       }
 
-      const data: ScreeningResult = await res.json();
+      const data = (await res.json()) as Partial<ScreeningResult>;
 
-      setResult(data);
+      /**
+       * Normalize the response so missing arrays
+       * never crash the UI.
+       */
+      const normalized = normalizeScreeningResult(data);
+
+      setResult(normalized);
       setMode("done");
     } catch (e: any) {
       setError(e.message || "Something went wrong");
 
       setMode("error");
     }
-  }, [resume, jd]);
+  }, [resume, jd, stopStreamDisplay]);
 
+  /**
+   * Streaming Analyze.
+   */
   const analyzeStream = useCallback(async () => {
-    if (!resume.trim() || !jd.trim()) return;
+    if (!resume.trim() || !jd.trim()) {
+      return;
+    }
+
+    /**
+     * Clear any previous stream.
+     */
+    abortRef.current?.abort();
+    stopStreamDisplay();
+
+    streamQueueRef.current = [];
+
+    streamNetworkFinishedRef.current = false;
 
     setMode("streaming");
     setResult(null);
@@ -360,6 +530,7 @@ export default function App() {
       const reader = res.body.getReader();
 
       const decoder = new TextDecoder();
+      startStreamDisplay();
 
       let buffer = "";
 
@@ -370,54 +541,81 @@ export default function App() {
           break;
         }
 
-        buffer += decoder.decode(value, { stream: true });
+        buffer += decoder.decode(value, {
+          stream: true,
+        });
 
-        const lines = buffer.split("\n");
+        const events = buffer.split("\n\n");
 
-        buffer = lines.pop() || "";
+        buffer = events.pop() || "";
 
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) {
-            continue;
-          }
+        for (const event of events) {
+          const lines = event.split("\n");
 
-          const payload = line.slice(6);
-
-          if (payload === "[DONE]") {
-            setMode("done");
-            return;
-          }
-
-          try {
-            const parsed = JSON.parse(payload);
-
-            if (parsed.error) {
-              setError(parsed.error);
-              setMode("error");
-              return;
+          for (const line of lines) {
+            if (!line.startsWith("data:")) {
+              continue;
             }
 
-            if (typeof parsed.text === "string" && parsed.text.length > 0) {
-              setStreamStarted(true);
+            const payload = line.slice(5).trim();
 
-              setStreamText((prev) => prev + parsed.text);
+            if (!payload) {
+              continue;
             }
-          } catch {}
+
+            if (payload === "[DONE]") {
+              streamNetworkFinishedRef.current = true;
+
+              continue;
+            }
+
+            try {
+              const parsed = JSON.parse(payload);
+
+              if (parsed.error) {
+                setError(parsed.error);
+
+                streamNetworkFinishedRef.current = true;
+
+                setMode("error");
+
+                return;
+              }
+
+              if (typeof parsed.text === "string" && parsed.text.length > 0) {
+                streamQueueRef.current.push(parsed.text);
+              }
+            } catch {}
+          }
         }
       }
 
-      setMode("done");
+      buffer += decoder.decode();
+      streamNetworkFinishedRef.current = true;
+
+      if (streamQueueRef.current.length === 0) {
+        stopStreamDisplay();
+        setMode("done");
+      }
     } catch (e: any) {
       if (e.name !== "AbortError") {
+        stopStreamDisplay();
+
         setError(e.message || "Stream failed");
 
         setMode("error");
       }
     }
-  }, [resume, jd]);
+  }, [resume, jd, startStreamDisplay, stopStreamDisplay]);
 
   const reset = () => {
     abortRef.current?.abort();
+
+    stopStreamDisplay();
+
+    streamQueueRef.current = [];
+
+    streamNetworkFinishedRef.current = false;
 
     setMode("idle");
     setResult(null);
@@ -438,7 +636,6 @@ export default function App() {
         flexDirection: "column",
       }}
     >
-      {/* Header */}
       <header
         style={{
           padding: "20px 32px",
@@ -531,7 +728,7 @@ export default function App() {
               margin: "0 auto",
             }}
           >
-            Paste your resume and a job description. Claude analyzes the match,
+            Paste your resume and a job description. AI analyzes the match,
             flags gaps, and writes you a tailored summary.
           </p>
         </div>
@@ -726,7 +923,7 @@ export default function App() {
               background: "var(--surface)",
               border: "1.5px solid var(--border)",
               borderRadius: "var(--radius)",
-              padding: "24px",
+              padding: 24,
             }}
           >
             <p
@@ -746,9 +943,10 @@ export default function App() {
             <div
               style={{
                 fontFamily: "var(--font-body)",
+                minHeight: 80,
               }}
             >
-              {/* Waiting for first real chunk */}
+              {/* Waiting before first visible text */}
               {mode === "streaming" && !streamStarted && (
                 <div
                   style={{
@@ -774,10 +972,11 @@ export default function App() {
                 </div>
               )}
 
-              {/* Actual streamed content */}
+              {/* Progressive streamed content */}
               {streamText && renderStreamedMarkdown(streamText)}
 
-              {/* Cursor only AFTER first chunk */}
+              {/* Cursor only while text is actively
+                  being displayed */}
               {mode === "streaming" && streamStarted && (
                 <span
                   style={{
@@ -799,6 +998,7 @@ export default function App() {
                   0%,100% {
                     opacity: 1;
                   }
+
                   50% {
                     opacity: 0;
                   }
@@ -809,6 +1009,7 @@ export default function App() {
                     opacity: 0.35;
                     transform: scale(0.9);
                   }
+
                   50% {
                     opacity: 1;
                     transform: scale(1);
@@ -908,9 +1109,20 @@ export default function App() {
             >
               <Card title="Matched Skills">
                 <div>
-                  {result.matchedSkills.map((s) => (
-                    <Pill key={s} text={s} color="var(--green)" />
-                  ))}
+                  {result.matchedSkills.length === 0 ? (
+                    <span
+                      style={{
+                        color: "var(--text-muted)",
+                        fontSize: 13,
+                      }}
+                    >
+                      No strong matches identified.
+                    </span>
+                  ) : (
+                    result.matchedSkills.map((s) => (
+                      <Pill key={s} text={s} color={"var(--green)"} />
+                    ))
+                  )}
                 </div>
               </Card>
 
@@ -927,7 +1139,7 @@ export default function App() {
                     </span>
                   ) : (
                     result.missingSkills.map((s) => (
-                      <Pill key={s} text={s} color="var(--red)" />
+                      <Pill key={s} text={s} color={"var(--red)"} />
                     ))
                   )}
                 </div>
@@ -951,18 +1163,29 @@ export default function App() {
                     gap: 8,
                   }}
                 >
-                  {result.strengths.map((s, i) => (
+                  {result.strengths.length === 0 ? (
                     <li
-                      key={i}
                       style={{
                         fontSize: 13,
-                        color: "var(--text)",
-                        lineHeight: 1.6,
+                        color: "var(--text-muted)",
                       }}
                     >
-                      {s}
+                      No specific strengths identified.
                     </li>
-                  ))}
+                  ) : (
+                    result.strengths.map((s, i) => (
+                      <li
+                        key={i}
+                        style={{
+                          fontSize: 13,
+                          color: "var(--text)",
+                          lineHeight: 1.6,
+                        }}
+                      >
+                        {s}
+                      </li>
+                    ))
+                  )}
                 </ul>
               </Card>
 
@@ -975,18 +1198,29 @@ export default function App() {
                     gap: 8,
                   }}
                 >
-                  {result.gaps.map((g, i) => (
+                  {result.gaps.length === 0 ? (
                     <li
-                      key={i}
                       style={{
                         fontSize: 13,
-                        color: "var(--text)",
-                        lineHeight: 1.6,
+                        color: "var(--text-muted)",
                       }}
                     >
-                      {g}
+                      No significant gaps identified.
                     </li>
-                  ))}
+                  ) : (
+                    result.gaps.map((g, i) => (
+                      <li
+                        key={i}
+                        style={{
+                          fontSize: 13,
+                          color: "var(--text)",
+                          lineHeight: 1.6,
+                        }}
+                      >
+                        {g}
+                      </li>
+                    ))
+                  )}
                 </ul>
               </Card>
             </div>

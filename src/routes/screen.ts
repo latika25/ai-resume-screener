@@ -45,10 +45,6 @@ screenRouter.post("/screen", async (req: Request, res: Response) => {
   }
 });
 
-/* -------------------------------------------------------------------------- */
-/* STREAMING ANALYSIS                                                         */
-/* -------------------------------------------------------------------------- */
-
 screenRouter.post("/screen/stream", async (req: Request, res: Response) => {
   const { resume, jobDescription } = req.body;
 
@@ -67,16 +63,8 @@ screenRouter.post("/screen/stream", async (req: Request, res: Response) => {
 
   res.setHeader("Connection", "keep-alive");
 
-  /*
-   * Prevent reverse proxies from buffering
-   * the SSE response.
-   */
   res.setHeader("X-Accel-Buffering", "no");
 
-  /*
-   * Explicitly tell Node/proxies that this
-   * response is being sent in chunks.
-   */
   res.setHeader("Transfer-Encoding", "chunked");
 
   if (typeof res.flushHeaders === "function") {

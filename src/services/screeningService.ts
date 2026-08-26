@@ -71,6 +71,26 @@ technicalSkills
 + ownershipCollaboration
 
 - matchScore must be between 0 and 100.
+
+RECOMMENDATION RULES:
+
+- Apply:
+  Strong overall alignment with the core requirements. Missing skills
+  should mainly be learnable or non-critical.
+
+- Maybe:
+  Reasonable overall alignment, but there are meaningful gaps in tools,
+  domain experience, or role-specific requirements.
+
+- Skip:
+  The candidate lacks important core requirements or has a substantial
+  mismatch with the role.
+
+- Do not recommend Skip merely because the candidate lacks one or two
+  preferred technologies.
+
+- The recommendation must be consistent with the score, matched skills,
+  missing skills, strengths, and gaps.
 `;
 
 /* -------------------------------------------------------------------------- */
@@ -123,26 +143,43 @@ ${resume}
 Job Description:
 ${jobDescription}
 
-Return EXACTLY this JSON structure:
+Return a COMPLETE JSON object based on the actual resume and job description.
+
+IMPORTANT:
+The structure below is a SCHEMA, NOT an example response.
+Do NOT copy the empty values. Every field must contain the actual analysis.
 
 {
-  "matchScore": 0,
+  "matchScore": <calculated score>,
   "scoreBreakdown": {
-    "technicalSkills": 0,
-    "relevantExperience": 0,
-    "growthProduct": 0,
-    "roleSpecific": 0,
-    "ownershipCollaboration": 0
+    "technicalSkills": <0-30>,
+    "relevantExperience": <0-25>,
+    "growthProduct": <0-20>,
+    "roleSpecific": <0-15>,
+    "ownershipCollaboration": <0-10>
   },
-  "matchedSkills": [],
-  "missingSkills": [],
-  "strengths": [],
-  "gaps": [],
-  "recommendation": "",
-  "tailoredSummary": ""
+  "matchedSkills": [
+    "<actual matching skill>"
+  ],
+  "missingSkills": [
+    "<actual missing requirement>"
+  ],
+  "strengths": [
+    "<specific strength supported by the resume>"
+  ],
+  "gaps": [
+    "<specific gap based on the job description>"
+  ],
+  "recommendation": "<apply|maybe|skip>",
+  "tailoredSummary": "<exactly two professional sentences>"
 }
 
 Rules:
+- Every field must contain the actual analysis.
+- Do not return empty strings.
+- Do not return empty arrays when relevant evidence exists.
+- matchedSkills: provide at least 3 important matches when evidence exists.
+- missingSkills: provide at least 2 meaningful missing requirements when evidence exists.
 
 - recommendation must be exactly:
   "apply"
@@ -162,6 +199,7 @@ Rules:
 - Do not invent skills.
 - Do not give credit for technologies merely
   because they are common in the industry.
+- recommendation must follow the recommendation rules in the scoring contract.
 `,
       },
     ],
