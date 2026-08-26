@@ -19,13 +19,13 @@ interface ScreeningResult {
 
 type Mode = "idle" | "loading" | "streaming" | "done" | "error";
 
-function scoreColor(score: number) {
+export function scoreColor(score: number) {
   if (score >= 75) return "var(--green)";
   if (score >= 50) return "var(--yellow)";
   return "var(--red)";
 }
 
-function recLabel(r: string) {
+export function recLabel(r: string) {
   if (r === "apply") return { label: "Strong Apply", color: "var(--green)" };
   if (r === "maybe") return { label: "Worth Trying", color: "var(--yellow)" };
   return { label: "Skip This One", color: "var(--red)" };
@@ -166,12 +166,12 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
   });
 }
 
-function isTableRow(line: string) {
+export function isTableRow(line: string) {
   const t = line.trim();
   return t.startsWith("|") && t.endsWith("|") && t.length > 1;
 }
 
-function isTableSeparator(line: string) {
+export function isTableSeparator(line: string) {
   return /^\|?[\s:-]+\|[\s:|-]*$/.test(line.trim());
 }
 
@@ -184,7 +184,6 @@ function renderStreamedMarkdown(text: string): React.ReactNode[] {
   while (i < lines.length) {
     const line = lines[i];
 
-    // Tables
     if (isTableRow(line)) {
       const tableLines: string[] = [];
 
@@ -271,7 +270,6 @@ function renderStreamedMarkdown(text: string): React.ReactNode[] {
   return blocks;
 }
 
-// ── Main App ───────────────────────────────────────────────────────────────
 export default function App() {
   const [resume, setResume] = useState("");
   const [jd, setJd] = useState("");
@@ -281,15 +279,12 @@ export default function App() {
 
   const [streamText, setStreamText] = useState("");
 
-  // NEW:
-  // True only after the first real text chunk has arrived.
   const [streamStarted, setStreamStarted] = useState(false);
 
   const [error, setError] = useState("");
 
   const abortRef = useRef<AbortController | null>(null);
 
-  // ── Normal analysis ─────────────────────────────────────────────────────
   const analyze = useCallback(async () => {
     if (!resume.trim() || !jd.trim()) return;
 
@@ -328,7 +323,6 @@ export default function App() {
     }
   }, [resume, jd]);
 
-  // ── Streaming analysis ─────────────────────────────────────────────────
   const analyzeStream = useCallback(async () => {
     if (!resume.trim() || !jd.trim()) return;
 
@@ -372,7 +366,9 @@ export default function App() {
       while (true) {
         const { done, value } = await reader.read();
 
-        if (done) break;
+        if (done) {
+          break;
+        }
 
         buffer += decoder.decode(value, { stream: true });
 
@@ -402,16 +398,11 @@ export default function App() {
             }
 
             if (typeof parsed.text === "string" && parsed.text.length > 0) {
-              // IMPORTANT:
-              // The cursor is not displayed until
-              // this point is reached.
               setStreamStarted(true);
 
               setStreamText((prev) => prev + parsed.text);
             }
-          } catch {
-            // Ignore malformed/incomplete SSE lines.
-          }
+          } catch {}
         }
       }
 
@@ -425,7 +416,6 @@ export default function App() {
     }
   }, [resume, jd]);
 
-  // ── Reset ───────────────────────────────────────────────────────────────
   const reset = () => {
     abortRef.current?.abort();
 
